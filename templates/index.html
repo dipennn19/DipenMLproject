@@ -1,0 +1,53 @@
+{% extends 'base.html' %}
+
+{% block title %}HealthPulse | Home{% endblock %}
+
+{% block page_title %}Welcome to HealthPulse{% endblock %}
+
+{% block content %}
+<div class="hero-panel glass-card">
+  <div class="hero-copy">
+    <h2>Stay ahead of your medications with smart reminders.</h2>
+    <p>Manage doses, family care, daily wellness, and medicine stock with a modern healthcare dashboard.</p>
+    <div class="hero-actions">
+      <a href="{{ url_for('signup') }}" class="btn btn-primary">Start Free</a>
+      <a href="{{ url_for('login') }}" class="btn btn-secondary">Login</a>
+    </div>
+  </div>
+  <div class="hero-visual">
+    <div class="pulse-card">
+      <div class="pulse-header">
+        <span>Next Reminder</span>
+        <strong>08:00 AM</strong>
+      </div>
+      <div class="pulse-body">
+        <h3>Vitamin D</h3>
+        <p>Daily dose after breakfast</p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="feature-grid">
+  <article class="feature-card glass-card">
+    <i class="fas fa-bell"></i>
+    <h3>Smart Reminders</h3>
+    <p>Receive browser notifications and voice alerts.</p>
+  </article>
+  <article class="feature-card glass-card">
+    <i class="fas fa-heartbeat"></i>
+    <h3>Health Progress</h3>
+    <p>Track your streaks and daily completion rate.</p>
+  </article>
+  <article class="feature-card glass-card">
+    <i class="fas fa-file-pdf"></i>
+    <h3>Reports & Logs</h3>
+    <p>Download medicine history and share with your doctor.</p>
+  </article>
+  <article class="feature-card glass-card">
+    <i class="fas fa-mobile-alt"></i>
+    <h3>PWA Ready</h3>
+    <p>Install the app on mobile and use it offline.</p>
+  </article>
+</div>
+{% endblock %}

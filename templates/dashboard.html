@@ -1,0 +1,98 @@
+{% extends 'base.html' %}
+
+{% block title %}Dashboard | HealthPulse{% endblock %}
+
+{% block page_title %}Dashboard Overview{% endblock %}
+
+{% block content %}
+<div class="dashboard-grid">
+  <article class="card glass-card">
+    <h3>Todays Medicines</h3>
+    <p>{{ todays|length }} scheduled</p>
+    <div class="card-value">{{ todays|length }}</div>
+  </article>
+  <article class="card glass-card">
+    <h3>Completion</h3>
+    <p>Todays progress</p>
+    <div class="card-value">{{ completion }}%</div>
+  </article>
+  <article class="card glass-card">
+    <h3>Upcoming</h3>
+    <p>Next reminders</p>
+    <div class="card-value">{{ upcoming|length }}</div>
+  </article>
+  <article class="card glass-card">
+    <h3>Health Streak</h3>
+    <p>Days with taken doses</p>
+    <div class="card-value">{{ streak }}</div>
+  </article>
+</div>
+
+<div class="main-stack">
+  <div class="wide-panel glass-card">
+    <div class="panel-header">
+      <div><h2>Weekly Progress</h2><p>Track your healing habit</p></div>
+      <div class="mini-badge">Updated today</div>
+    </div>
+    <canvas id="progressChart"></canvas>
+  </div>
+
+  <div class="info-column">
+    <div class="glass-card summary-block">
+      <h2>Upcoming reminders</h2>
+      {% if upcoming %}
+      <ul class="reminder-list">
+        {% for med in upcoming %}
+        <li><strong>{{ med.name }}</strong> at {{ med.time }} on {{ med.date }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">No upcoming reminders. Add a medicine to get started.</p>
+      {% endif %}
+    </div>
+
+    <div class="glass-card summary-block">
+      <h2>Missed doses</h2>
+      {% if missed %}
+      <ul class="reminder-list">
+        {% for med in missed %}
+        <li>{{ med.name }} scheduled for {{ med.date }}</li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted">No missed medicines. Great job staying on track.</p>
+      {% endif %}
+    </div>
+
+    <div class="glass-card tips-block">
+      <h2>AI Health Tips</h2>
+      <ul class="tips-list">
+        {% for tip in tips %}
+        <li><i class="fas fa-check-circle"></i>{{ tip }}</li>
+        {% endfor %}
+      </ul>
+    </div>
+  </div>
+</div>
+
+<div class="feature-row">
+  <div class="glass-card water-card">
+    <div class="feature-head"><i class="fas fa-tint"></i><span>Water Reminder</span></div>
+    <p>Keep your hydration on schedule with quick reminders.</p>
+    <button class="btn btn-secondary" onclick="notifyWater()">Remind me</button>
+  </div>
+  <div class="glass-card sos-card">
+    <div class="feature-head"><i class="fas fa-phone-alt"></i><span>Emergency SOS</span></div>
+    <p>Quick alert for urgent healthy decisions.</p>
+    <button class="btn btn-danger" onclick="triggerSOS()">SOS</button>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const progressLabels = {{ labels | tojson }};
+const progressCounts = {{ progress_data | tojson }};
+</script>
+{% endblock %}

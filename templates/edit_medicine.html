@@ -1,0 +1,43 @@
+{% extends 'base.html' %}
+
+{% block title %}Edit Medicine | HealthPulse{% endblock %}
+
+{% block page_title %}Edit Medicine{% endblock %}
+
+{% block content %}
+<div class="edit-panel glass-card">
+  <h2>Edit details for {{ medicine.name }}</h2>
+  <form action="{{ url_for('edit_medicine', medicine_id=medicine.id) }}" method="post" class="form-grid">
+    <label>Medicine Name</label>
+    <input type="text" name="name" value="{{ medicine.name }}" required />
+    <label>Dosage</label>
+    <input type="text" name="dosage" value="{{ medicine.dosage }}" />
+    <label>Date</label>
+    <input type="date" name="date" value="{{ medicine.date }}" required />
+    <label>Time</label>
+    <input type="time" name="time" value="{{ medicine.time }}" required />
+    <label>Frequency</label>
+    <select name="frequency">
+      <option {% if medicine.frequency == 'Daily' %}selected{% endif %}>Daily</option>
+      <option {% if medicine.frequency == 'Weekly' %}selected{% endif %}>Weekly</option>
+      <option {% if medicine.frequency == 'Monthly' %}selected{% endif %}>Monthly</option>
+    </select>
+    <label>Food Relation</label>
+    <select name="food_relation">
+      <option {% if medicine.food_relation == 'Before Food' %}selected{% endif %}>Before Food</option>
+      <option {% if medicine.food_relation == 'After Food' %}selected{% endif %}>After Food</option>
+    </select>
+    <label>Priority</label>
+    <select name="priority">
+      <option {% if medicine.priority == 'Normal' %}selected{% endif %}>Normal</option>
+      <option {% if medicine.priority == 'High' %}selected{% endif %}>High</option>
+      <option {% if medicine.priority == 'Critical' %}selected{% endif %}>Critical</option>
+    </select>
+    <label>Stock</label>
+    <input type="number" name="stock" min="0" value="{{ medicine.stock }}" />
+    <label>Notes</label>
+    <textarea name="notes">{{ medicine.notes }}</textarea>
+    <button type="submit" class="btn btn-primary">Save Changes</button>
+  </form>
+</div>
+{% endblock %}

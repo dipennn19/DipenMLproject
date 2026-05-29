@@ -1,0 +1,22 @@
+{% extends 'base.html' %}
+
+{% block title %}Login | HealthPulse{% endblock %}
+
+{% block page_title %}Login to your account{% endblock %}
+
+{% block content %}
+<div class="auth-grid">
+  <div class="auth-panel glass-card">
+    <h2>Welcome back</h2>
+    <p>Sign in to manage your medicine schedule and reminders.</p>
+    <form action="{{ url_for('login') }}" method="post" class="auth-form">
+      <label>Email</label>
+      <input type="email" name="email" placeholder="you@example.com" required />
+      <label>Password</label>
+      <input type="password" name="password" placeholder="Enter your password" required />
+      <button type="submit" class="btn btn-primary">Login</button>
+      <p class="auth-note">New here? <a href="{{ url_for('signup') }}">Create an account</a></p>
+    </form>
+  </div>
+</div>
+{% endblock %}

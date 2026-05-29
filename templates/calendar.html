@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+
+{% block title %}Calendar | HealthPulse{% endblock %}
+
+{% block page_title %}Medicine Calendar{% endblock %}
+
+{% block content %}
+<div class="calendar-shell">
+  <div class="glass-card calendar-overview">
+    <h2>Month Planner</h2>
+    <p>See upcoming doses and plan ahead.</p>
+    <div class="calendar-grid">
+      {% for med in medicines %}
+      <div class="calendar-card {% if med.stock < 5 %}low-stock{% endif %}">
+        <span class="calendar-date">{{ med.date }}</span>
+        <strong>{{ med.name }}</strong>
+        <p>{{ med.time }} · {{ med.frequency }}</p>
+        <small>{{ med.food_relation }} · Stock: {{ med.stock }}</small>
+      </div>
+      {% endfor %}
+      {% if medicines|length == 0 %}
+      <p class="muted">No medicines scheduled yet. Add a reminder from the Medicines tab.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,15 @@
+{% extends 'base.html' %}
+
+{% block title %}Report | HealthPulse{% endblock %}
+
+{% block page_title %}Download Report{% endblock %}
+
+{% block content %}
+<div class="report-panel glass-card">
+  <h2>Medicine History Report</h2>
+  <p>Download a PDF summary of your current medicine schedule and status.</p>
+  <div class="report-actions">
+    <a href="{{ url_for('report') }}" class="btn btn-primary">Download PDF Report</a>
+  </div>
+</div>
+{% endblock %}

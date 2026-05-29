@@ -1,0 +1,16 @@
+{
+  "name": "HealthPulse Medicine Reminder",
+  "short_name": "HealthPulse",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#081c34",
+  "theme_color": "#5fd7a8",
+  "description": "A modern medicine reminder PWA with health tracking and alerts.",
+  "icons": [
+    {
+      "src": "/static/images/app-icon.svg",
+      "sizes": "192x192",
+      "type": "image/svg+xml"
+    }
+  ]
+}
