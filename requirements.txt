@@ -1,3 +1,10 @@
-Flask>=2.2
-Werkzeug>=2.2
-reportlab>=4.0
+Flask==2.3.2
+Werkzeug==2.3.4
+Jinja2==3.1.2
+itsdangerous==2.1.2
+click==8.1.7
+PyPDF2==3.0.1
+
+# Note: many advanced features use client-side libraries (Chart.js, jsPDF, QR libs).
+# Install with: pip install -r requirements.txt
+asgiref

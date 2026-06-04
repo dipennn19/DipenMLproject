@@ -75,6 +75,24 @@ function scanQRCode() {
   alert(sampleInfo);
 }
 
+function postAction(url) {
+  fetch(url, { method: 'POST', credentials: 'same-origin' })
+    .then((res) => res.json())
+    .then(() => {
+      // simple approach: reload to show updated status
+      window.location.reload();
+    })
+    .catch((err) => console.error('Action failed', err));
+}
+
+function markTaken(id) {
+  postAction(`/medicines/mark/${id}/taken`);
+}
+
+function markSkipped(id) {
+  postAction(`/medicines/mark/${id}/skipped`);
+}
+
 function registerServiceWorker() {
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker

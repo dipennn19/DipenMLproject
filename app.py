@@ -1,471 +1,267 @@
-from flask import Flask, render_template, request, redirect, url_for, session, send_file, flash
-from werkzeug.security import generate_password_hash, check_password_hash
-import sqlite3
-from pathlib import Path
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-import io
-import datetime
 import os
+import sqlite3
+from datetime import datetime, date
+from flask import Flask, render_template, request, redirect, url_for, session, g, jsonify, send_file
+from werkzeug.security import generate_password_hash, check_password_hash
+from functools import wraps
 
-BASE_DIR = Path(__file__).resolve().parent
-DB_PATH = BASE_DIR / "medicine_reminder.db"
+BASE_DIR = os.path.abspath(os.path.dirname(__file__))
+DATABASE = os.environ.get('DATABASE', os.path.join(BASE_DIR, 'medicine_reminder.db'))
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("FLASK_SECRET_KEY", "change_this_secret_key")
-
-# Initialize or migrate database tables
-def init_db():
-    conn = sqlite3.connect(DB_PATH)
-    c = conn.cursor()
-
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            email TEXT NOT NULL UNIQUE,
-            password TEXT NOT NULL,
-            created_at TEXT NOT NULL
-        )
-        """
-    )
-
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS medicines (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            dosage TEXT,
-            date TEXT,
-            time TEXT,
-            frequency TEXT,
-            food_relation TEXT,
-            priority TEXT,
-            notes TEXT,
-            stock INTEGER DEFAULT 0,
-            status TEXT DEFAULT 'pending',
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        )
-        """
-    )
-
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS history (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            medicine_id INTEGER,
-            action TEXT,
-            remark TEXT,
-            timestamp TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id),
-            FOREIGN KEY(medicine_id) REFERENCES medicines(id)
-        )
-        """
-    )
-
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS reminders (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            medicine_id INTEGER,
-            reminder_time TEXT,
-            active INTEGER DEFAULT 1,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id),
-            FOREIGN KEY(medicine_id) REFERENCES medicines(id)
-        )
-        """
-    )
-
-    c.execute(
-        """
-        CREATE TABLE IF NOT EXISTS family_members (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            name TEXT NOT NULL,
-            relation TEXT,
-            age INTEGER,
-            notes TEXT,
-            created_at TEXT NOT NULL,
-            FOREIGN KEY(user_id) REFERENCES users(id)
-        )
-        """
-    )
-
-    conn.commit()
-    conn.close()
+app.secret_key = os.environ.get('SECRET_KEY', 'dev-secret-key')
+app.config['DATABASE'] = DATABASE
 
 
-def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    return conn
+# -------------------- Database helpers --------------------
+def get_db():
+    db = getattr(g, '_database', None)
+    if db is None:
+        db = g._database = sqlite3.connect(app.config['DATABASE'])
+        db.row_factory = sqlite3.Row
+    return db
 
 
-def current_user():
-    if "user_id" not in session:
-        return None
-    conn = get_db_connection()
-    user = conn.execute("SELECT * FROM users WHERE id = ?", (session["user_id"],)).fetchone()
-    conn.close()
-    return user
+@app.teardown_appcontext
+def close_connection(exception):
+    db = getattr(g, '_database', None)
+    if db is not None:
+        db.close()
 
 
-def login_required(route):
-    def wrapper(*args, **kwargs):
-        if "user_id" not in session:
-            return redirect(url_for("login"))
-        return route(*args, **kwargs)
-    wrapper.__name__ = route.__name__
-    return wrapper
+def query_db(query, args=(), one=False):
+    cur = get_db().execute(query, args)
+    rv = cur.fetchall()
+    cur.close()
+    return (rv[0] if rv else None) if one else rv
 
 
-@app.route("/")
+def execute_db(query, args=()):
+    db = get_db()
+    cur = db.execute(query, args)
+    db.commit()
+    return cur.lastrowid
+
+
+# -------------------- Auth helpers --------------------
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if 'user_id' not in session:
+            return redirect(url_for('login', next=request.url))
+        return f(*args, **kwargs)
+
+    return decorated_function
+
+
+def get_current_user():
+    if 'user_id' in session:
+        user = query_db('SELECT * FROM users WHERE id = ?', [session['user_id']], one=True)
+        return user
+    return None
+
+
+# -------------------- Routes --------------------
+@app.route('/')
 def index():
-    if "user_id" in session:
-        return redirect(url_for("dashboard"))
-    return render_template("index.html")
+    return render_template('index.html', user=get_current_user())
 
 
-@app.route("/signup", methods=["GET", "POST"])
+# Authentication
+@app.route('/signup', methods=['GET', 'POST'])
 def signup():
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
-        confirm = request.form.get("confirm_password", "")
-
-        if not name or not email or not password or password != confirm:
-            flash("Please provide valid signup details and matching passwords.", "error")
-            return render_template("signup.html")
-
-        conn = get_db_connection()
-        existing = conn.execute("SELECT id FROM users WHERE email = ?", (email,)).fetchone()
-        if existing:
-            flash("An account with this email already exists.", "error")
-            conn.close()
-            return render_template("signup.html")
-
-        hashed = generate_password_hash(password)
-        conn.execute(
-            "INSERT INTO users (name, email, password, created_at) VALUES (?, ?, ?, ?)",
-            (name, email, hashed, datetime.datetime.utcnow().isoformat()),
-        )
-        conn.commit()
-        conn.close()
-        flash("Signup successful. Please log in.", "success")
-        return redirect(url_for("login"))
-
-    return render_template("signup.html")
+    if request.method == 'POST':
+        username = request.form.get('username') or request.form.get('name') or 'User'
+        email = request.form['email'].strip()
+        password = request.form['password']
+        if query_db('SELECT id FROM users WHERE email = ?', [email], one=True):
+            return render_template('signup.html', error='Email already registered')
+        pw_hash = generate_password_hash(password)
+        execute_db('INSERT INTO users (username, email, password_hash, created_at) VALUES (?, ?, ?, ?)',
+                   (username, email, pw_hash, datetime.utcnow()))
+        return redirect(url_for('login'))
+    return render_template('signup.html')
 
 
-@app.route("/login", methods=["GET", "POST"])
+@app.route('/login', methods=['GET', 'POST'])
 def login():
-    if request.method == "POST":
-        email = request.form.get("email", "").strip().lower()
-        password = request.form.get("password", "")
-
-        conn = get_db_connection()
-        user = conn.execute("SELECT * FROM users WHERE email = ?", (email,)).fetchone()
-        conn.close()
-
-        if user and check_password_hash(user["password"], password):
-            session["user_id"] = user["id"]
-            session["user_name"] = user["name"]
-            return redirect(url_for("dashboard"))
-
-        flash("Invalid email or password.", "error")
-    return render_template("login.html")
+    if request.method == 'POST':
+        email = request.form['email']
+        password = request.form['password']
+        user = query_db('SELECT * FROM users WHERE email = ?', [email], one=True)
+        if user and check_password_hash(user['password_hash'], password):
+            session['user_id'] = user['id']
+            return redirect(url_for('dashboard'))
+        return render_template('login.html', error='Invalid credentials')
+    return render_template('login.html')
 
 
-@app.route("/logout")
+@app.route('/logout')
 def logout():
     session.clear()
-    return redirect(url_for("login"))
+    return redirect(url_for('index'))
 
 
-@app.route("/dashboard")
+# Dashboard
+@app.route('/dashboard')
 @login_required
 def dashboard():
-    user = current_user()
-    conn = get_db_connection()
-    today_str = datetime.date.today().isoformat()
-
-    medicines = conn.execute(
-        "SELECT * FROM medicines WHERE user_id = ? ORDER BY date, time",
-        (user["id"],),
-    ).fetchall()
-    todays = [m for m in medicines if m["date"] == today_str]
-    upcoming = [m for m in medicines if m["date"] >= today_str][:5]
-    missed = [m for m in medicines if m["date"] < today_str and m["status"] == "pending"]
-
-    completed = conn.execute(
-        "SELECT COUNT(*) AS cnt FROM history WHERE user_id = ? AND action = 'taken' AND timestamp >= ?",
-        (user["id"], f"{today_str}T00:00:00"),
-    ).fetchone()["cnt"]
-    total_today = len(todays)
-    completion = int(completed / total_today * 100) if total_today else 0
-
-    progress_data = []
-    labels = []
-    for offset in range(6, -1, -1):
-        day = datetime.date.today() - datetime.timedelta(days=offset)
-        label = day.strftime("%a")
-        labels.append(label)
-        count = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM history WHERE user_id = ? AND action = 'taken' AND timestamp LIKE ?",
-            (user["id"], f"{day.isoformat()}%"),
-        ).fetchone()["cnt"]
-        progress_data.append(count)
-
-    streak = 0
-    for offset in range(0, 7):
-        day = datetime.date.today() - datetime.timedelta(days=offset)
-        count = conn.execute(
-            "SELECT COUNT(*) AS cnt FROM history WHERE user_id = ? AND action = 'taken' AND timestamp LIKE ?",
-            (user["id"], f"{day.isoformat()}%"),
-        ).fetchone()["cnt"]
-        if count > 0:
-            streak += 1
-        else:
-            break
-
-    tips = [
-        "Stay hydrated: water helps medicines absorb better.",
-        "Set routine times for daily doses to build healthy habits.",
-        "Track side effects and share updates with your care team.",
-    ]
-
-    family = conn.execute(
-        "SELECT * FROM family_members WHERE user_id = ? ORDER BY name",
-        (user["id"],),
-    ).fetchall()
-
-    conn.close()
-    return render_template(
-        "dashboard.html",
-        user=user,
-        todays=todays,
-        upcoming=upcoming,
-        missed=missed,
-        completion=completion,
-        labels=labels,
-        progress_data=progress_data,
-        streak=streak,
-        tips=tips,
-        family=family,
-    )
+    user = get_current_user()
+    today_str = date.today().isoformat()
+    todays = query_db('SELECT * FROM medicines WHERE user_id = ? AND date = ? ORDER BY time', (user['id'], today_str))
+    total = len(todays)
+    taken = len([m for m in todays if m['status'] == 'taken'])
+    completion = int((taken / total * 100) if total else 0)
+    upcoming = query_db('SELECT * FROM medicines WHERE user_id = ? AND date >= ? ORDER BY date, time LIMIT 10', (user['id'], today_str))
+    missed = query_db('SELECT * FROM medicines WHERE user_id = ? AND date < ? AND status = "pending"', (user['id'], today_str))
+    # For demo simplicity, send minimal stats
+    return render_template('dashboard.html', user=user, todays=todays, completion=completion, upcoming=upcoming, missed=missed, tips=[], labels=[], progress_data=[], streak=0)
 
 
-@app.route("/medicines", methods=["GET", "POST"])
+# Medicines CRUD
+@app.route('/medicines')
 @login_required
 def medicines():
-    user = current_user()
-    conn = get_db_connection()
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        dosage = request.form.get("dosage", "").strip()
-        date = request.form.get("date", "")
-        time = request.form.get("time", "")
-        frequency = request.form.get("frequency", "Daily")
-        food_relation = request.form.get("food_relation", "Before Food")
-        priority = request.form.get("priority", "Normal")
-        notes = request.form.get("notes", "").strip()
-        stock = int(request.form.get("stock", 0))
-
-        if not name or not date or not time:
-            flash("Medicine name, date, and time are required.", "error")
-            return redirect(url_for("medicines"))
-
-        conn.execute(
-            "INSERT INTO medicines (user_id, name, dosage, date, time, frequency, food_relation, priority, notes, stock, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-            (user["id"], name, dosage, date, time, frequency, food_relation, priority, notes, stock, datetime.datetime.utcnow().isoformat()),
-        )
-        conn.commit()
-        flash("Medicine added to your schedule.", "success")
-
-    meds = conn.execute(
-        "SELECT * FROM medicines WHERE user_id = ? ORDER BY date, time",
-        (user["id"],),
-    ).fetchall()
-    conn.close()
-    return render_template("medicines.html", user=user, medicines=meds)
+    user = get_current_user()
+    q = request.args.get('q', '')
+    freq = request.args.get('frequency', '')
+    sql = 'SELECT * FROM medicines WHERE user_id = ?'
+    params = [user['id']]
+    if q:
+        sql += ' AND (medicine_name LIKE ? OR notes LIKE ?)'
+        params.extend([f'%{q}%', f'%{q}%'])
+    if freq:
+        sql += ' AND frequency = ?'
+        params.append(freq)
+    sql += ' ORDER BY date, time'
+    meds = query_db(sql, params)
+    return render_template('medicines.html', user=user, medicines=meds, q=q, freq=freq)
 
 
-@app.route("/medicine/edit/<int:medicine_id>", methods=["GET", "POST"])
+@app.route('/medicines/add', methods=['GET', 'POST'])
 @login_required
-def edit_medicine(medicine_id):
-    user = current_user()
-    conn = get_db_connection()
-    medicine = conn.execute(
-        "SELECT * FROM medicines WHERE id = ? AND user_id = ?", (medicine_id, user["id"])
-    ).fetchone()
-
-    if not medicine:
-        conn.close()
-        return redirect(url_for("medicines"))
-
-    if request.method == "POST":
-        name = request.form.get("name", medicine["name"]).strip()
-        dosage = request.form.get("dosage", medicine["dosage"]).strip()
-        date = request.form.get("date", medicine["date"])
-        time = request.form.get("time", medicine["time"])
-        frequency = request.form.get("frequency", medicine["frequency"])
-        food_relation = request.form.get("food_relation", medicine["food_relation"])
-        priority = request.form.get("priority", medicine["priority"])
-        notes = request.form.get("notes", medicine["notes"]).strip()
-        stock = int(request.form.get("stock", medicine["stock"]))
-
-        conn.execute(
-            "UPDATE medicines SET name = ?, dosage = ?, date = ?, time = ?, frequency = ?, food_relation = ?, priority = ?, notes = ?, stock = ? WHERE id = ? AND user_id = ?",
-            (name, dosage, date, time, frequency, food_relation, priority, notes, stock, medicine_id, user["id"]),
-        )
-        conn.commit()
-        conn.close()
-        flash("Medicine details updated successfully.", "success")
-        return redirect(url_for("medicines"))
-
-    conn.close()
-    return render_template("edit_medicine.html", user=user, medicine=medicine)
+def add_medicine():
+    user = get_current_user()
+    if request.method == 'POST':
+        data = {
+            'medicine_name': request.form.get('medicine_name'),
+            'dosage': request.form.get('dosage'),
+            'date': request.form.get('date'),
+            'time': request.form.get('time'),
+            'frequency': request.form.get('frequency'),
+            'before_after': request.form.get('before_after'),
+            'priority': request.form.get('priority'),
+            'notes': request.form.get('notes'),
+            'user_id': user['id']
+        }
+        execute_db('''INSERT INTO medicines (user_id, medicine_name, dosage, date, time, frequency, before_after, priority, notes, status, created_at)
+                      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)''',
+                   (data['user_id'], data['medicine_name'], data['dosage'], data['date'], data['time'], data['frequency'], data['before_after'], data['priority'], data['notes'], datetime.utcnow()))
+        return redirect(url_for('medicines'))
+    return render_template('add_edit_medicine.html', user=user, edit=False)
 
 
-@app.route("/medicine/delete/<int:medicine_id>")
+@app.route('/medicines/edit/<int:mid>', methods=['GET', 'POST'])
 @login_required
-def delete_medicine(medicine_id):
-    user = current_user()
-    conn = get_db_connection()
-    conn.execute("DELETE FROM medicines WHERE id = ? AND user_id = ?", (medicine_id, user["id"]))
-    conn.execute("DELETE FROM reminders WHERE medicine_id = ? AND user_id = ?", (medicine_id, user["id"]))
-    conn.commit()
-    conn.close()
-    flash("Medicine removed from the schedule.", "success")
-    return redirect(url_for("medicines"))
+def edit_medicine(mid):
+    user = get_current_user()
+    med = query_db('SELECT * FROM medicines WHERE id = ? AND user_id = ?', (mid, user['id']), one=True)
+    if not med:
+        return redirect(url_for('medicines'))
+    if request.method == 'POST':
+        execute_db('''UPDATE medicines SET medicine_name=?, dosage=?, date=?, time=?, frequency=?, before_after=?, priority=?, notes=? WHERE id=?''',
+                   (request.form.get('medicine_name'), request.form.get('dosage'), request.form.get('date'), request.form.get('time'), request.form.get('frequency'), request.form.get('before_after'), request.form.get('priority'), request.form.get('notes'), mid))
+        return redirect(url_for('medicines'))
+    return render_template('add_edit_medicine.html', user=user, med=med, edit=True)
 
 
-@app.route("/medicine/status/<int:medicine_id>/<action>", methods=["POST"])
+@app.route('/medicines/delete/<int:mid>', methods=['POST'])
 @login_required
-def medicine_status(medicine_id, action):
-    user = current_user()
-    conn = get_db_connection()
-    now = datetime.datetime.utcnow().isoformat()
-    if action not in ["taken", "skipped"]:
-        conn.close()
-        return redirect(url_for("dashboard"))
-
-    conn.execute(
-        "UPDATE medicines SET status = ? WHERE id = ? AND user_id = ?",
-        (action, medicine_id, user["id"]),
-    )
-    conn.execute(
-        "INSERT INTO history (user_id, medicine_id, action, remark, timestamp) VALUES (?, ?, ?, ?, ?)",
-        (user["id"], medicine_id, action, f"Marked {action}", now),
-    )
-    conn.commit()
-    conn.close()
-    flash(f"Medicine marked as {action}.", "success")
-    return redirect(url_for("dashboard"))
+def delete_medicine(mid):
+    user = get_current_user()
+    execute_db('DELETE FROM medicines WHERE id = ? AND user_id = ?', (mid, user['id']))
+    return redirect(url_for('medicines'))
 
 
-@app.route("/calendar")
+@app.route('/medicines/mark/<int:mid>/<string:action>', methods=['POST'])
 @login_required
-def calendar_view():
-    user = current_user()
-    conn = get_db_connection()
-    medicines = conn.execute(
-        "SELECT * FROM medicines WHERE user_id = ? ORDER BY date, time",
-        (user["id"],),
-    ).fetchall()
-    conn.close()
-    return render_template("calendar.html", user=user, medicines=medicines)
+def mark_medicine(mid, action):
+    user = get_current_user()
+    if action == 'taken':
+        execute_db('UPDATE medicines SET status = "taken" WHERE id = ? AND user_id = ?', (mid, user['id']))
+        execute_db('INSERT INTO history (user_id, medicine_id, action, timestamp) VALUES (?, ?, ?, ?)', (user['id'], mid, 'taken', datetime.utcnow()))
+    elif action == 'skipped':
+        execute_db('UPDATE medicines SET status = "skipped" WHERE id = ? AND user_id = ?', (mid, user['id']))
+        execute_db('INSERT INTO history (user_id, medicine_id, action, timestamp) VALUES (?, ?, ?, ?)', (user['id'], mid, 'skipped', datetime.utcnow()))
+    return jsonify({'status': 'ok'})
 
 
-@app.route("/family", methods=["GET", "POST"])
+# API: reminders for client-side polling
+@app.route('/api/reminders')
+@login_required
+def api_reminders():
+    user = get_current_user()
+    today = date.today().isoformat()
+    meds = query_db('SELECT id, medicine_name, date, time, frequency, before_after, priority, status FROM medicines WHERE user_id = ? AND date = ? AND status = "pending"', (user['id'], today))
+    items = [dict(m) for m in meds]
+    return jsonify(items)
+
+
+# History and reports
+@app.route('/history')
+@login_required
+def history():
+    user = get_current_user()
+    logs = query_db('SELECT h.*, m.medicine_name FROM history h LEFT JOIN medicines m ON h.medicine_id = m.id WHERE h.user_id = ? ORDER BY timestamp DESC', (user['id'],))
+    return render_template('history.html', user=user, logs=logs)
+
+
+@app.route('/api/history')
+@login_required
+def api_history():
+    user = get_current_user()
+    logs = query_db('SELECT h.*, m.medicine_name FROM history h LEFT JOIN medicines m ON h.medicine_id = m.id WHERE h.user_id = ? ORDER BY timestamp DESC', (user['id'],))
+    return jsonify([dict(r) for r in logs])
+
+
+# Simple family members
+@app.route('/family', methods=['GET', 'POST'])
 @login_required
 def family():
-    user = current_user()
-    conn = get_db_connection()
-    if request.method == "POST":
-        name = request.form.get("name", "").strip()
-        relation = request.form.get("relation", "").strip()
-        age = request.form.get("age", "0")
-        notes = request.form.get("notes", "").strip()
-
-        if not name:
-            flash("Family member name is required.", "error")
-            return redirect(url_for("family"))
-
-        conn.execute(
-            "INSERT INTO family_members (user_id, name, relation, age, notes, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-            (user["id"], name, relation, int(age or 0), notes, datetime.datetime.utcnow().isoformat()),
-        )
-        conn.commit()
-        flash("Family profile added.", "success")
-
-    members = conn.execute(
-        "SELECT * FROM family_members WHERE user_id = ? ORDER BY name",
-        (user["id"],),
-    ).fetchall()
-    conn.close()
-    return render_template("family.html", user=user, members=members)
+    user = get_current_user()
+    if request.method == 'POST':
+        name = request.form.get('name')
+        relation = request.form.get('relation')
+        execute_db('INSERT INTO family_members (user_id, name, relation) VALUES (?, ?, ?)', (user['id'], name, relation))
+        return redirect(url_for('family'))
+    members = query_db('SELECT * FROM family_members WHERE user_id = ?', (user['id'],))
+    return render_template('family.html', user=user, members=members)
 
 
-@app.route("/report")
-@login_required
-def report():
-    user = current_user()
-    conn = get_db_connection()
-    medicines = conn.execute(
-        "SELECT * FROM medicines WHERE user_id = ? ORDER BY date, time",
-        (user["id"],),
-    ).fetchall()
-    conn.close()
-
-    buffer = io.BytesIO()
-    doc = canvas.Canvas(buffer, pagesize=letter)
-    width, height = letter
-    doc.setTitle("Medicine History Report")
-    doc.setFont("Helvetica-Bold", 18)
-    doc.drawString(40, height - 50, "Medicine History Report")
-    doc.setFont("Helvetica", 11)
-    doc.drawString(40, height - 70, f"Patient: {user['name']} ({user['email']})")
-    doc.drawString(40, height - 90, f"Generated: {datetime.datetime.utcnow().strftime('%Y-%m-%d %H:%M UTC')}")
-
-    y = height - 130
-    for med in medicines:
-        doc.setFont("Helvetica-Bold", 12)
-        doc.drawString(40, y, f"{med['name']} - {med['dosage']} ({med['priority']})")
-        y -= 16
-        doc.setFont("Helvetica", 10)
-        doc.drawString(44, y, f"Date: {med['date']} | Time: {med['time']} | Frequency: {med['frequency']} | Food: {med['food_relation']}")
-        y -= 14
-        doc.drawString(44, y, f"Stock: {med['stock']} | Status: {med['status']} | Notes: {med['notes']}")
-        y -= 24
-        if y < 80:
-            doc.showPage()
-            y = height - 80
-
-    doc.save()
-    buffer.seek(0)
-    return send_file(
-        buffer,
-        as_attachment=True,
-        download_name="medicine_history_report.pdf",
-        mimetype="application/pdf",
-    )
+# Static utilities
+@app.route('/manifest.json')
+def manifest():
+    return send_file(os.path.join('static', 'manifest.json'))
 
 
-@app.errorhandler(404)
-def page_not_found(e):
-    return render_template("404.html"), 404
+# -------------------- DB Initialization Helper --------------------
+def init_db():
+    if not os.path.exists(os.path.join(BASE_DIR, 'init_db.sql')):
+        return
+    with app.app_context():
+        db = get_db()
+        cur = db.cursor()
+        cur.executescript(open(os.path.join(BASE_DIR, 'init_db.sql')).read())
+        db.commit()
 
 
-# Ensure the SQLite database tables exist before the app starts.
-init_db()
-
-if __name__ == "__main__":
+if __name__ == '__main__':
+    # If DB missing, initialize
+    if not os.path.exists(DATABASE):
+        if not os.path.exists(os.path.join(BASE_DIR, 'init_db.sql')):
+            print('Database schema missing: init_db.sql not found. Please ensure it exists.')
+        else:
+            print('Initializing database...')
+            init_db()
+            print('Done. You can create a user at /signup')
     app.run(debug=True)

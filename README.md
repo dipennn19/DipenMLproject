@@ -92,3 +92,29 @@ Then open `http://127.0.0.1:5000` in your browser.
 ## Notes
 - Replace `app.secret_key` with a secure random key in production.
 - This project is ready for college-level demonstration and can be extended with external APIs or authentication providers.
+
+## Deploying to Vercel (overview)
+
+Important: Vercel's serverless environment is ephemeral — SQLite files written to disk will not persist between invocations. For production on Vercel you should use a managed database (Postgres, MySQL, or Supabase). The instructions below show how to route requests through a serverless Python function using an ASGI wrapper.
+
+1. Install the Vercel CLI and login:
+
+```bash
+npm i -g vercel
+vercel login
+```
+
+2. Ensure `vercel.json` and `api/asgi.py` are present (this project includes them). Add `asgiref` to `requirements.txt` (already done).
+
+3. Set environment variables in the Vercel Dashboard (Project Settings) — at minimum set `SECRET_KEY` and a production `DATABASE` connection string to an external DB.
+
+4. Deploy:
+
+```bash
+vercel --prod
+```
+
+Notes and alternatives:
+- If you must use SQLite for testing, consider deploying to Render, Railway, or a VM where persistent disk is available.
+- On Vercel, point your app to an external managed DB (for example, Supabase) and update `DATABASE` accordingly. Update `app.py` to read `DATABASE` from environment if needed.
+
